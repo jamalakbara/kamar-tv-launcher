@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "tv-kamar"
-include(":app", ":framextv")
+include(":app")
