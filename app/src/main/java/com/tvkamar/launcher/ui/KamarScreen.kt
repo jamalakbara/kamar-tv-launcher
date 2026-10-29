@@ -9,6 +9,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -78,6 +79,7 @@ fun KamarScreen(
     account: String?,
     avatar: ImageBitmap?,
     wallpaper: ImageBitmap?,
+    wallpaperVideo: String?,
     wallpaperCredit: String?,
     wallpaperSettings: WallpaperSettings,
     sidebarPinned: Boolean,
@@ -89,7 +91,7 @@ fun KamarScreen(
         CompositionLocalProvider(LocalContentColor provides Color.White) {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 if (data != null) {
-                    Launcher(data, account, avatar, wallpaper, wallpaperCredit, wallpaperSettings, sidebarPinned, hiddenCount, homeTicks, actions)
+                    Launcher(data, account, avatar, wallpaper, wallpaperVideo, wallpaperCredit, wallpaperSettings, sidebarPinned, hiddenCount, homeTicks, actions)
                 }
             }
         }
@@ -103,6 +105,7 @@ private fun Launcher(
     account: String?,
     avatar: ImageBitmap?,
     wallpaper: ImageBitmap?,
+    wallpaperVideo: String?,
     wallpaperCredit: String?,
     wallpaperSettings: WallpaperSettings,
     sidebarPinned: Boolean,
@@ -123,7 +126,10 @@ private fun Launcher(
     var resetTicks by remember { mutableIntStateOf(0) }
     var slide by remember { mutableStateOf<Slide?>(null) }
     val shownSlide = slide ?: data.watched.firstOrNull()?.toSlide() ?: data.apps.firstOrNull()?.toSlide()
-    // What the glass panels show through them: the wallpaper, or the artwork's soft backdrop.
+    // The aerial video as the backdrop draws it, replayed live by the glass.
+    val videoLayer = rememberGraphicsLayer()
+    val glassVideo = if (wallpaperVideo != null) videoLayer else null
+    // What the glass panels show through them otherwise: the wallpaper, or the artwork's soft backdrop.
     val glassBackdrop = wallpaper ?: shownSlide?.backdrop
 
     // Start (and Home button): Home page with the first dock app focused.
@@ -189,7 +195,10 @@ private fun Launcher(
                 } else false
             },
     ) {
-        Backdrop(shownSlide, wallpaper, dim)
+        Backdrop(
+            shownSlide, wallpaper, wallpaperVideo, videoLayer, dim,
+            onVideoEnded = actions::wallpaperVideoEnded,
+        )
 
         // Pages start right of the sidebar: focus search only moves Right to things whose
         // bounds start right of the sidebar, and scroll containers are full-width groups.
@@ -237,7 +246,7 @@ private fun Launcher(
         }
 
         // Floats over the backdrop and content, like the tvOS sidebar.
-        CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop) {
+        CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop, LocalGlassVideo provides glassVideo) {
             Sidebar(
                 page = page,
                 expanded = sidebarExpanded,
@@ -276,7 +285,7 @@ private fun Launcher(
     }
 
     if (wallpaperPanel) {
-        CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop) {
+        CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop, LocalGlassVideo provides glassVideo) {
             WallpaperPanel(
                 settings = wallpaperSettings,
                 credit = wallpaperCredit,
@@ -288,7 +297,7 @@ private fun Launcher(
     }
 
     if (airPlayPanel) {
-        CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop) {
+        CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop, LocalGlassVideo provides glassVideo) {
             AirPlayPanel(onDismiss = { airPlayPanel = false })
         }
     }

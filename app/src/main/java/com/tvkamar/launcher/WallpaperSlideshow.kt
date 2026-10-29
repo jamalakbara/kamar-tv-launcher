@@ -8,14 +8,14 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.util.Calendar
 import kotlin.random.Random
 
 /** Where the Home wallpaper comes from. */
 enum class WallpaperSource(val label: String) {
     Artwork("Off · your picture or the artwork"),
     Reddit("Reddit slideshow"),
-    Unsplash("Unsplash slideshow"),
+    Wallhaven("Wallhaven slideshow"),
+    Aerials("Apple TV Aerials (video)"),
 }
 
 /** Reddit listing order, as in Arc Launcher. */
@@ -28,15 +28,32 @@ enum class RedditSort(val label: String, val rssPath: String) {
     New("New", "new.rss"),
 }
 
-/** Unsplash editorial topics, plus a Milky Way collection since there is no space topic. */
-enum class UnsplashCategory(val label: String, val param: String, val id: String) {
-    Wallpapers("Wallpapers", "topics", "bo8jQKTaE0Y"),
-    Nature("Nature", "topics", "6sMVjTLSkeQ"),
-    Travel("Travel", "topics", "Fzo3zuOHN6w"),
-    Architecture("Architecture", "topics", "M8jVbLbTRws"),
-    Renders("3D Renders", "topics", "CDwuwXJAbEw"),
-    Textures("Textures", "topics", "iUIsnVtjB0Y"),
-    MilkyWay("Milky Way", "collections", "2286207"),
+/** Wallhaven listing order. */
+enum class WallhavenSort(val label: String, val query: String) {
+    TopMonth("Top this month", "sorting=toplist&topRange=1M"),
+    TopYear("Top this year", "sorting=toplist&topRange=1y"),
+    Favorites("Most favourited", "sorting=favorites"),
+    Views("Most viewed", "sorting=views"),
+    Random("Random", "sorting=random"),
+}
+
+/** Wallhaven search terms. */
+enum class WallhavenTopic(val label: String, val query: String) {
+    Landscapes("Landscapes", "landscape"),
+    Nature("Nature", "nature"),
+    Space("Space", "space"),
+    Cities("Cities", "city"),
+    Minimal("Minimal", "minimalism"),
+    Abstract("Abstract", "abstract"),
+    DigitalArt("Digital art", "digital art"),
+}
+
+/** Categories of Apple's aerial videos, by their key in Apple's list. */
+enum class AerialCategory(val label: String, val key: String) {
+    Landscapes("Landscapes", "AerialCategoryLandscapes"),
+    Cities("Cities", "AerialCategoryCities"),
+    Space("Space", "AerialCategorySpace"),
+    Underwater("Underwater", "AerialCategoryUnderwater"),
 }
 
 val POPULAR_SUBREDDITS = listOf(
@@ -51,18 +68,21 @@ data class WallpaperSettings(
     val intervalMin: Int = 30,
     val subreddits: Set<String> = setOf("wallpapers", "wallpaper", "EarthPorn", "spaceporn"),
     val redditSort: RedditSort = RedditSort.Hot,
-    val unsplashKey: String = "",
-    val dayCategories: Set<UnsplashCategory> = setOf(UnsplashCategory.Nature, UnsplashCategory.Wallpapers, UnsplashCategory.Renders),
-    val nightCategories: Set<UnsplashCategory> = setOf(UnsplashCategory.MilkyWay),
+    val wallhavenSort: WallhavenSort = WallhavenSort.TopYear,
+    val wallhavenTopics: Set<WallhavenTopic> = setOf(WallhavenTopic.Landscapes, WallhavenTopic.Nature, WallhavenTopic.Space),
+    val aerialCategories: Set<AerialCategory> = AerialCategory.entries.toSet(),
 )
 
 /** A downloaded slideshow picture and who made it. */
 data class SlideshowImage(val file: File, val credit: String)
 
+/** An Apple TV aerial video, streamed rather than downloaded. */
+data class AerialVideo(val id: String, val url: String, val credit: String)
+
 /**
- * Arc Launcher's Reddit and Unsplash wallpaper slideshows. Pictures are downloaded into the
- * app's files; only the newest two are kept, so the last one still shows when offline.
- * Network calls block, so use it off the main thread.
+ * Wallpaper slideshows: Reddit (as in Arc Launcher) and Wallhaven pictures, or Apple TV aerial
+ * videos. Pictures are downloaded into the app's files; only the newest two are kept, so the
+ * last one still shows when offline. Network calls block, so use it off the main thread.
  */
 class WallpaperSlideshow(context: Context) {
     private val prefs = context.getSharedPreferences("launcher", Context.MODE_PRIVATE)
@@ -72,6 +92,10 @@ class WallpaperSlideshow(context: Context) {
     private val postCache = mutableMapOf<String, Pair<Long, List<RedditPost>>>()
     private var rateLimitedUntil = 0L
 
+    /** Wallhaven results per topic, sort and page (same 20 min), and how many pages each search has. */
+    private val wallhavenCache = mutableMapOf<String, Pair<Long, List<WallhavenImage>>>()
+    private val wallhavenPages = mutableMapOf<String, Int>()
+
     fun settings(): WallpaperSettings {
         val d = WallpaperSettings()
         return WallpaperSettings(
@@ -79,9 +103,9 @@ class WallpaperSlideshow(context: Context) {
             intervalMin = prefs.getInt("wp.interval", d.intervalMin),
             subreddits = prefs.getStringSet("wp.subreddits", null) ?: d.subreddits,
             redditSort = enumOr(prefs.getString("wp.sort", null), d.redditSort),
-            unsplashKey = prefs.getString("wp.unsplashKey", null) ?: d.unsplashKey,
-            dayCategories = categories("wp.day") ?: d.dayCategories,
-            nightCategories = categories("wp.night") ?: d.nightCategories,
+            wallhavenSort = enumOr(prefs.getString("wp.whSort", null), d.wallhavenSort),
+            wallhavenTopics = enumSet<WallhavenTopic>("wp.whTopics") ?: d.wallhavenTopics,
+            aerialCategories = enumSet<AerialCategory>("wp.aerials") ?: d.aerialCategories,
         )
     }
 
@@ -91,14 +115,16 @@ class WallpaperSlideshow(context: Context) {
             .putInt("wp.interval", s.intervalMin)
             .putStringSet("wp.subreddits", s.subreddits)
             .putString("wp.sort", s.redditSort.name)
-            .putString("wp.unsplashKey", s.unsplashKey)
-            .putStringSet("wp.day", s.dayCategories.map { it.name }.toSet())
-            .putStringSet("wp.night", s.nightCategories.map { it.name }.toSet())
+            .putString("wp.whSort", s.wallhavenSort.name)
+            .putStringSet("wp.whTopics", s.wallhavenTopics.map { it.name }.toSet())
+            .putStringSet("wp.aerials", s.aerialCategories.map { it.name }.toSet())
+            // Left over from the Unsplash slideshow, which is gone.
+            .remove("wp.unsplashKey").remove("wp.day").remove("wp.night")
             .apply()
     }
 
-    private fun categories(key: String) = prefs.getStringSet(key, null)
-        ?.mapNotNull { name -> UnsplashCategory.entries.firstOrNull { it.name == name } }?.toSet()
+    private inline fun <reified E : Enum<E>> enumSet(key: String) = prefs.getStringSet(key, null)
+        ?.mapNotNull { name -> enumValues<E>().firstOrNull { it.name == name } }?.toSet()
 
     private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
         enumValues<E>().firstOrNull { it.name == name } ?: default
@@ -119,9 +145,9 @@ class WallpaperSlideshow(context: Context) {
     fun next(s: WallpaperSettings): SlideshowImage? {
         val image = runCatching {
             when (s.source) {
-                WallpaperSource.Artwork -> null
+                WallpaperSource.Artwork, WallpaperSource.Aerials -> null
                 WallpaperSource.Reddit -> nextReddit(s)
-                WallpaperSource.Unsplash -> nextUnsplash(s)
+                WallpaperSource.Wallhaven -> nextWallhaven(s)
             }
         }.onFailure { Log.w(TAG, "slideshow", it) }.getOrNull() ?: return null
         prefs.edit().putString("wp.credit", image.credit).putString("wp.currentSource", s.source.name).apply()
@@ -187,38 +213,93 @@ class WallpaperSlideshow(context: Context) {
     private fun unescape(s: String) = s.replace("&quot;", "\"").replace("&apos;", "'").replace("&#39;", "'")
         .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 
-    // --- Unsplash -------------------------------------------------------------
+    // --- Wallhaven -----------------------------------------------------------
 
-    private fun nextUnsplash(s: WallpaperSettings): SlideshowImage? {
-        if (s.unsplashKey.isBlank()) return null
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        val night = hour >= 19 || hour < 6
-        val defaults = WallpaperSettings()
-        val pool = (if (night) s.nightCategories else s.dayCategories)
-            .ifEmpty { if (night) defaults.nightCategories else defaults.dayCategories }.toList()
-        val category = pool[Random.nextInt(pool.size)]
+    private data class WallhavenImage(val id: String, val url: String)
 
-        val query = "${category.param}=${enc(category.id)}&orientation=landscape&content_filter=high"
-        val conn = open("https://api.unsplash.com/photos/random?$query", AGENT)
-        conn.setRequestProperty("Authorization", "Client-ID ${s.unsplashKey.trim()}")
-        conn.setRequestProperty("Accept-Version", "v1")
+    private fun nextWallhaven(s: WallpaperSettings): SlideshowImage? {
+        val topics = s.wallhavenTopics.ifEmpty { WallpaperSettings().wallhavenTopics }.toList()
+        val topic = topics[Random.nextInt(topics.size)]
+        // Skip the pictures still on disk: the one on screen and the one before it.
+        val fresh = wallhavenImages(topic, s.wallhavenSort).filterNot { File(dir, "w_${it.id}.jpg").exists() }
+        for (image in fresh.shuffled().take(4)) {
+            val file = download(image.url, "w_${image.id}") ?: continue
+            return SlideshowImage(file, "${topic.label} · wallhaven.cc/w/${image.id}")
+        }
+        return null
+    }
+
+    /** General, safe-for-work, 16:9 pictures of at least 1080p, from a random one of the first few pages. */
+    private fun wallhavenImages(topic: WallhavenTopic, sort: WallhavenSort): List<WallhavenImage> {
+        val search = "$topic|$sort"
+        val page = Random.nextInt(1, (wallhavenPages[search] ?: 1).coerceAtMost(5) + 1)
+        val key = "$search|$page"
+        if (sort != WallhavenSort.Random) {
+            wallhavenCache[key]?.let { (at, images) -> if (System.currentTimeMillis() - at < 20 * 60_000L) return images }
+        }
+
+        val query = "q=${enc(topic.query)}&categories=100&purity=100&atleast=1920x1080&ratios=16x9&${sort.query}&page=$page"
+        val conn = open("https://wallhaven.cc/api/v1/search?$query", AGENT)
         if (conn.responseCode != 200) {
-            Log.w(TAG, "Unsplash ${conn.responseCode}")
-            return null
+            Log.w(TAG, "Wallhaven ${conn.responseCode}")
+            return emptyList()
         }
         val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-        val id = json.getString("id")
-        val url = json.getJSONObject("urls").getString("raw") + "&w=1920&h=1080&fit=crop&fm=jpg&q=80"
-        val author = json.getJSONObject("user").getString("name")
-        val file = download(url, "u_$id") ?: return null
-
-        // Required by the Unsplash API guidelines when a photo is used.
-        runCatching {
-            val ping = open(json.getJSONObject("links").getString("download_location"), AGENT)
-            ping.setRequestProperty("Authorization", "Client-ID ${s.unsplashKey.trim()}")
-            ping.responseCode
+        wallhavenPages[search] = json.getJSONObject("meta").optInt("last_page", 1)
+        val data = json.getJSONArray("data")
+        val images = (0 until data.length()).map { i ->
+            val item = data.getJSONObject(i)
+            WallhavenImage(item.getString("id"), item.getString("path"))
         }
-        return SlideshowImage(file, "Photo by $author on Unsplash")
+        if (images.isNotEmpty()) wallhavenCache[key] = System.currentTimeMillis() to images
+        return images
+    }
+
+    // --- Apple TV Aerials -----------------------------------------------------
+
+    /** A random aerial from [s]'s categories, other than the one [currentId] names; null when offline. */
+    fun nextAerial(s: WallpaperSettings, currentId: String?): AerialVideo? = runCatching {
+        val categories = s.aerialCategories.ifEmpty { AerialCategory.entries.toSet() }.map { it.key }.toSet()
+        val all = aerials()
+        val pool = all.filter { it.second in categories }.ifEmpty { all }.map { it.first }
+        pool.filter { it.id != currentId }.ifEmpty { pool }.randomOrNull()
+    }.onFailure { Log.w(TAG, "aerials", it) }.getOrNull()
+
+    /** Apple's list of aerials with each one's category, cached for a week. */
+    private fun aerials(): List<Pair<AerialVideo, String>> {
+        val cache = File(dir, "aerials.json")
+        val stale = System.currentTimeMillis() - cache.lastModified() > 7 * 24 * 60 * 60_000L
+        if (!cache.exists() || stale) {
+            runCatching { fetchAerialList()?.let(cache::writeText) }.onFailure { Log.w(TAG, "aerial list", it) }
+        }
+        val json = JSONObject(cache.readText())
+        val categoryKeys = json.getJSONArray("categories").let { list ->
+            (0 until list.length()).associate { i -> list.getJSONObject(i).let { it.getString("id") to it.getString("localizedNameKey") } }
+        }
+        val assets = json.getJSONArray("assets")
+        return (0 until assets.length()).mapNotNull { i ->
+            val a = assets.getJSONObject(i)
+            // 1080p H.264: every TV decodes it, and this one only has a 720p panel anyway.
+            val url = a.optString("url-1080-H264").ifEmpty { return@mapNotNull null }
+            val category = a.optJSONArray("categories")?.optString(0)?.let(categoryKeys::get).orEmpty()
+            AerialVideo(a.getString("id"), url.replace("https://", "http://"), "${a.optString("accessibilityLabel")} · Apple TV Aerial") to category
+        }
+    }
+
+    /** entries.json out of the tar the Apple TV downloads (about 2 MB). */
+    private fun fetchAerialList(): String? {
+        val conn = open(AERIAL_LIST, AGENT)
+        if (conn.responseCode != 200) return null
+        val tar = conn.inputStream.use { it.readBytes() }
+        var at = 0
+        while (at + 512 <= tar.size) {
+            val name = String(tar, at, 100, Charsets.US_ASCII).substringBefore('\u0000')
+            if (name.isEmpty()) break
+            val size = String(tar, at + 124, 12, Charsets.US_ASCII).trim('\u0000', ' ').toLong(8).toInt()
+            if (name.removePrefix("./") == "entries.json") return String(tar, at + 512, size, Charsets.UTF_8)
+            at += 512 + (size + 511) / 512 * 512
+        }
+        return null
     }
 
     // --- Files ------------------------------------------------------------------
@@ -251,6 +332,8 @@ class WallpaperSlideshow(context: Context) {
     companion object {
         private const val TAG = "KamarWallpaper"
         private const val AGENT = "android:com.tvkamar.launcher:v1.0"
+        // Over plain HTTP: Apple's servers use a certificate from Apple's own root, which Android doesn't trust.
+        private const val AERIAL_LIST = "http://sylvan.apple.com/Aerials/resources-16.tar"
         // Reddit serves its RSS feeds to feed readers without a login.
         private const val RSS_AGENT = "Feedly/1.0 (+http://www.feedly.com/fetcher.html; like FeedFetcher-Google)"
     }

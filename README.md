@@ -13,8 +13,8 @@ Home is laid out like [Arc Launcher](https://github.com/meddouribadis/arclaunche
 - **Watch Next** — what you were last watching (from media sessions), with progress.
 - **Dock** — frosted tray with your first six apps; the rest sit in a grid below.
   Focused tiles get a white-and-dark double border that shows on any wallpaper.
-- **Wallpaper** (sidebar → Wallpaper) — Reddit or Unsplash slideshow like Arc Launcher, every
-  5 min to 24 h, with the photo credit under the clock. Off: your pushed picture, otherwise the
+- **Wallpaper** (sidebar → Wallpaper) — Reddit or Wallhaven slideshow every 5 min to 24 h, or
+  Apple TV aerial videos, with the credit under the clock. Off: your pushed picture, otherwise the
   focused title or app's artwork.
 - **Screensaver** — after 5 min without a key press: black screen with a dim clock that moves every 30 s.
 - **Apps page** — grid of every app. Hold OK (or press Menu) on any app to move, hide or uninstall it.
@@ -87,12 +87,12 @@ Open **Wallpaper** in the sidebar to pick the source:
 - **Reddit slideshow** — subreddits (r/wallpapers, r/EarthPorn, r/spaceporn, ...) and order
   (Hot, Top today/week/month/all, New). Uses Reddit's public RSS feeds, no account needed;
   portrait pictures are skipped.
-- **Unsplash slideshow** — separate day (6:00–19:00) and night categories. Needs a free access key from
-  [unsplash.com/developers](https://unsplash.com/developers): type it in the panel, or send it over adb:
-
-  ```bash
-  adb -s 192.168.18.9:5555 shell "am start -n com.tvkamar.launcher/.MainActivity --es unsplash_key 'YOUR_ACCESS_KEY'"
-  ```
+- **Wallhaven slideshow** — topics (landscapes, nature, space, cities, ...) and order (top this
+  month/year, most favourited, most viewed, random). Only 16:9 pictures of at least 1920×1080,
+  safe for work, no account needed.
+- **Apple TV Aerials** — Apple's drone and space videos (landscapes, cities, space, underwater),
+  streamed in 1080p H.264, muted, one after another. Paused while another app is open.
+  Fetched over plain HTTP: Apple's certificate isn't trusted by Android.
 
 Only the current and previous pictures are kept on the TV, so the last one still shows offline.
 

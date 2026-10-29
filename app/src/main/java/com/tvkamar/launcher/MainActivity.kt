@@ -45,8 +45,9 @@ class MainActivity : ComponentActivity() {
 
     private val slideshow by lazy { WallpaperSlideshow(this) }
     private var wallpaperSettings by mutableStateOf(WallpaperSettings())
-    /** Current Reddit / Unsplash picture, and who made it. */
+    /** Current slideshow picture (or aerial video), and who made it. */
     private var slideshowPicture by mutableStateOf<ImageBitmap?>(null)
+    private var aerial by mutableStateOf<AerialVideo?>(null)
     private var wallpaperCredit by mutableStateOf<String?>(null)
     private var slideshowJob: Job? = null
 
@@ -80,13 +81,13 @@ class MainActivity : ComponentActivity() {
         override fun appInfo(pkg: String) = startSafely(repo.appInfoIntent(pkg))
         override fun uninstall(pkg: String) = startSafely(repo.uninstallIntent(pkg))
         override fun setWallpaperSettings(settings: WallpaperSettings) {
-            val restart = settings.source != wallpaperSettings.source || settings.intervalMin != wallpaperSettings.intervalMin ||
-                (settings.unsplashKey != wallpaperSettings.unsplashKey && slideshowPicture == null)
+            val restart = settings.source != wallpaperSettings.source || settings.intervalMin != wallpaperSettings.intervalMin
             slideshow.save(settings)
             wallpaperSettings = settings
             if (restart) startSlideshow()
         }
         override fun nextWallpaper() = startSlideshow(now = true)
+        override fun wallpaperVideoEnded(failed: Boolean) = startSlideshow(now = true, afterError = failed)
         override fun setSidebarPinned(pinned: Boolean) {
             getSharedPreferences("launcher", MODE_PRIVATE).edit().putBoolean("sidebar_pinned", pinned).apply()
             sidebarPinned = pinned
@@ -111,13 +112,13 @@ class MainActivity : ComponentActivity() {
         sidebarPinned = getSharedPreferences("launcher", MODE_PRIVATE).getBoolean("sidebar_pinned", false)
         wallpaperSettings = slideshow.settings()
         saveProfileName(intent)
-        saveUnsplashKey(intent)
         setContent {
             val slideshowOn = wallpaperSettings.source != WallpaperSource.Artwork
             KamarScreen(
                 data, profileName ?: account, avatar,
                 wallpaper = if (slideshowOn) slideshowPicture ?: wallpaper else wallpaper,
-                wallpaperCredit = if (slideshowOn && slideshowPicture != null) wallpaperCredit else null,
+                wallpaperVideo = if (slideshowOn) aerial?.url else null,
+                wallpaperCredit = if (slideshowOn && (slideshowPicture != null || aerial != null)) wallpaperCredit else null,
                 wallpaperSettings = wallpaperSettings,
                 sidebarPinned = sidebarPinned,
                 hiddenCount = hiddenCount,
@@ -149,7 +150,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         saveProfileName(intent)
-        saveUnsplashKey(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) homeTicks++
     }
 
@@ -160,22 +160,21 @@ class MainActivity : ComponentActivity() {
         profileName = name.ifEmpty { null }
     }
 
-    /** Set over adb: am start -n com.tvkamar.launcher/.MainActivity --es unsplash_key "KEY" */
-    private fun saveUnsplashKey(intent: Intent) {
-        val key = intent.getStringExtra("unsplash_key")?.trim() ?: return
-        actions.setWallpaperSettings(wallpaperSettings.copy(unsplashKey = key))
-    }
-
     /**
-     * Runs the Reddit / Unsplash slideshow while Kamar is on screen: shows the last picture
-     * straight away, then fetches a new one whenever the interval is up ([now] fetches at once).
+     * Runs the picture slideshow while Kamar is on screen: shows the last picture straight
+     * away, then fetches a new one whenever the interval is up ([now] fetches at once).
      */
-    private fun startSlideshow(now: Boolean = false) {
+    private fun startSlideshow(now: Boolean = false, afterError: Boolean = false) {
         slideshowJob?.cancel()
         val settings = wallpaperSettings
+        if (settings.source != WallpaperSource.Aerials) aerial = null
         if (settings.source == WallpaperSource.Artwork) {
             slideshowPicture = null
             wallpaperCredit = null
+            return
+        }
+        if (settings.source == WallpaperSource.Aerials) {
+            startAerials(now, afterError)
             return
         }
         slideshowJob = lifecycleScope.launch {
@@ -188,6 +187,25 @@ class MainActivity : ComponentActivity() {
                 fetchNow = false
                 val next = withContext(Dispatchers.IO) { slideshow.next(settings) }
                 if (next != null) show(next) else delay(5 * 60_000L) // offline or rate limited: try again later
+            }
+        }
+    }
+
+    /** Aerials play one after another; the backdrop says when each ends. Coming back to Kamar keeps the current one. */
+    private fun startAerials(now: Boolean, afterError: Boolean) {
+        slideshowPicture = null
+        if (!now && aerial != null) return
+        slideshowJob = lifecycleScope.launch {
+            // Offline or Apple's server is down: wait a while instead of failing in a loop.
+            if (afterError) delay(60_000L)
+            while (true) {
+                val next = withContext(Dispatchers.IO) { slideshow.nextAerial(wallpaperSettings, aerial?.id) }
+                if (next != null) {
+                    aerial = next
+                    wallpaperCredit = next.credit
+                    break
+                }
+                delay(5 * 60_000L)
             }
         }
     }
@@ -246,6 +264,8 @@ interface LauncherActions {
     fun setSidebarPinned(pinned: Boolean)
     fun setWallpaperSettings(settings: WallpaperSettings)
     fun nextWallpaper()
+    /** The aerial video on Home finished, or could not play. */
+    fun wallpaperVideoEnded(failed: Boolean)
 }
 
 private const val GOOGLE = "com.google"

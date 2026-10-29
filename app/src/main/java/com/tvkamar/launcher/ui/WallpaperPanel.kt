@@ -19,13 +19,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,7 +39,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,16 +46,18 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
+import com.tvkamar.launcher.AerialCategory
 import com.tvkamar.launcher.POPULAR_SUBREDDITS
 import com.tvkamar.launcher.RedditSort
 import com.tvkamar.launcher.SLIDESHOW_INTERVALS
-import com.tvkamar.launcher.UnsplashCategory
 import com.tvkamar.launcher.WallpaperSettings
 import com.tvkamar.launcher.WallpaperSource
+import com.tvkamar.launcher.WallhavenSort
+import com.tvkamar.launcher.WallhavenTopic
 
 /**
  * Wallpaper settings in a panel on the left, like Arc Launcher's settings: where the
- * picture comes from and the Reddit / Unsplash slideshow options. Every change applies at once.
+ * picture comes from and the Reddit / Wallhaven / Aerials options. Every change applies at once.
  */
 @Composable
 fun WallpaperPanel(
@@ -71,7 +69,6 @@ fun WallpaperPanel(
 ) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
-    var editingKey by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         // Dialogs dim the whole screen by default, which turns the glass into a flat grey slab.
@@ -111,11 +108,15 @@ fun WallpaperPanel(
 
                     if (settings.source != WallpaperSource.Artwork) {
                         Section("Slideshow")
-                        ValueRow("Change every", intervalLabel(settings.intervalMin)) {
-                            val next = SLIDESHOW_INTERVALS.getOrElse(SLIDESHOW_INTERVALS.indexOf(settings.intervalMin) + 1) { SLIDESHOW_INTERVALS.first() }
-                            onChange(settings.copy(intervalMin = next))
+                        // Aerials move on when each video ends.
+                        if (settings.source != WallpaperSource.Aerials) {
+                            ValueRow("Change every", intervalLabel(settings.intervalMin)) {
+                                val next = SLIDESHOW_INTERVALS.getOrElse(SLIDESHOW_INTERVALS.indexOf(settings.intervalMin) + 1) { SLIDESHOW_INTERVALS.first() }
+                                onChange(settings.copy(intervalMin = next))
+                            }
                         }
-                        ValueRow("Show the next picture now", "", onClick = onNext)
+                        val what = if (settings.source == WallpaperSource.Aerials) "video" else "picture"
+                        ValueRow("Show the next $what now", "", onClick = onNext)
                     }
 
                     if (settings.source == WallpaperSource.Reddit) {
@@ -131,35 +132,24 @@ fun WallpaperPanel(
                         }
                     }
 
-                    if (settings.source == WallpaperSource.Unsplash) {
-                        Section("Unsplash access key")
-                        if (editingKey) {
-                            KeyField(settings.unsplashKey) { key ->
-                                editingKey = false
-                                onChange(settings.copy(unsplashKey = key.trim()))
-                            }
-                        } else {
-                            ValueRow(
-                                if (settings.unsplashKey.isBlank()) "Enter access key" else "Change access key",
-                                if (settings.unsplashKey.isBlank()) "Not set" else "••••" + settings.unsplashKey.takeLast(4),
-                            ) { editingKey = true }
+                    if (settings.source == WallpaperSource.Wallhaven) {
+                        ValueRow("Order", settings.wallhavenSort.label) {
+                            val sorts = WallhavenSort.entries
+                            onChange(settings.copy(wallhavenSort = sorts[(settings.wallhavenSort.ordinal + 1) % sorts.size]))
                         }
-                        Text(
-                            "Free key from unsplash.com/developers. Or set it over adb, see README.",
-                            Modifier.padding(start = 14.dp, end = 8.dp, bottom = 4.dp),
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.45f),
-                        )
-                        Section("Daytime (6:00–19:00)")
-                        UnsplashCategory.entries.forEach { c ->
-                            OptionRow(c.label, checked = c in settings.dayCategories) {
-                                onChange(settings.copy(dayCategories = settings.dayCategories.toggle(c)))
+                        Section("Topics")
+                        WallhavenTopic.entries.forEach { t ->
+                            OptionRow(t.label, checked = t in settings.wallhavenTopics) {
+                                onChange(settings.copy(wallhavenTopics = settings.wallhavenTopics.toggle(t)))
                             }
                         }
-                        Section("Night")
-                        UnsplashCategory.entries.forEach { c ->
-                            OptionRow(c.label, checked = c in settings.nightCategories) {
-                                onChange(settings.copy(nightCategories = settings.nightCategories.toggle(c)))
+                    }
+
+                    if (settings.source == WallpaperSource.Aerials) {
+                        Section("Categories")
+                        AerialCategory.entries.forEach { c ->
+                            OptionRow(c.label, checked = c in settings.aerialCategories) {
+                                onChange(settings.copy(aerialCategories = settings.aerialCategories.toggle(c)))
                             }
                         }
                     }
@@ -236,21 +226,4 @@ internal fun ValueRow(label: String, value: String, onClick: () -> Unit) {
         Text(label, Modifier.weight(1f), color = fg, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         Text(value, color = fg.copy(alpha = 0.6f), fontSize = 15.sp, maxLines = 1)
     }
-}
-
-/** Text box for the Unsplash key; the TV's on-screen keyboard opens on focus. */
-@Composable
-private fun KeyField(initial: String, onDone: (String) -> Unit) {
-    var text by remember { mutableStateOf(initial) }
-    val requester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
-    OutlinedTextField(
-        value = text,
-        onValueChange = { text = it },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp).focusRequester(requester),
-        singleLine = true,
-        placeholder = { Text("Access key") },
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { onDone(text) }),
-    )
 }
