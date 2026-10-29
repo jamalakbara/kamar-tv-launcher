@@ -31,6 +31,9 @@
 #include "stream.h"
 
 #define RAOP_BUFFER_LENGTH 512
+/* How many newer packets may queue up behind a lost one while its resend is awaited (~11.6 ms each).
+ * Waiting for the whole buffer, as before, could hold the audio back by several seconds. */
+#define RAOP_RESEND_WAIT 8
 
 typedef struct {
 	/* Packet available */
@@ -369,8 +372,8 @@ raop_buffer_dequeue(raop_buffer_t *raop_buffer, int *length, unsigned int* pts, 
 	if (no_resend) {
 		/* If we do no resends, always return the first entry */
 	} else if (!entry->available) {
-		/* Check how much we have space left in the buffer */
-		if (buflen < RAOP_BUFFER_LENGTH) {
+		/* Give the resend a short head start, then skip the packet */
+		if (buflen < RAOP_RESEND_WAIT) {
 			/* Return nothing and hope resend gets on time */
 			return NULL;
 		}

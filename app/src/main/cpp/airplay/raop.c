@@ -198,17 +198,42 @@ conn_request(void *ptr, http_request_t *request, http_response_t **response)
 			logger_log(conn->raop->logger, LOGGER_WARNING, "RAOP not initialized at FLUSH");
 		}
 	} else if (!strcmp(method, "TEARDOWN")) {
-		http_response_add_header(*response, "Connection", "close");
-		if (conn->raop_rtp) {
-			/* Destroy our RTP session */
-			raop_rtp_destroy(conn->raop_rtp);
-			conn->raop_rtp = NULL;
+		/* A TEARDOWN that lists streams ends just those: macOS stops the audio stream (type 96)
+		 * whenever sound goes quiet and sets it up again later, while mirroring carries on.
+		 * Only a TEARDOWN without streams ends the whole session. */
+		int stop_audio = 1, stop_mirror = 1;
+		int datalen = 0;
+		const char *data = http_request_get_data(request, &datalen);
+		plist_t root = NULL;
+		if (data && datalen > 0) plist_from_bin(data, datalen, &root);
+		plist_t streams = root ? plist_dict_get_item(root, "streams") : NULL;
+		if (streams && plist_get_node_type(streams) == PLIST_ARRAY) {
+			stop_audio = stop_mirror = 0;
+			for (uint32_t i = 0; i < plist_array_get_size(streams); i++) {
+				plist_t type_node = plist_dict_get_item(plist_array_get_item(streams, i), "type");
+				uint64_t type = 0;
+				if (type_node) plist_get_uint_val(type_node, &type);
+				if (type == 96) stop_audio = 1;
+				if (type == 110) stop_mirror = 1;
+			}
 		}
-        if (conn->raop_rtp_mirror) {
-            /* Destroy our mirror session */
-            raop_rtp_mirror_destroy(conn->raop_rtp_mirror);
-            conn->raop_rtp_mirror = NULL;
-        }
+		if (root) plist_free(root);
+		logger_log(conn->raop->logger, LOGGER_INFO, "TEARDOWN audio=%d mirror=%d", stop_audio, stop_mirror);
+
+		if (stop_audio && stop_mirror) {
+			http_response_add_header(*response, "Connection", "close");
+			if (conn->raop_rtp) {
+				raop_rtp_destroy(conn->raop_rtp);
+				conn->raop_rtp = NULL;
+			}
+		} else if (stop_audio && conn->raop_rtp) {
+			/* Keep the keys: the next audio SETUP restarts this session */
+			raop_rtp_stop(conn->raop_rtp);
+		}
+		if (stop_mirror && conn->raop_rtp_mirror) {
+			raop_rtp_mirror_destroy(conn->raop_rtp_mirror);
+			conn->raop_rtp_mirror = NULL;
+		}
 	}
 	if (handler != NULL) {
 		handler(conn, request, *response, &response_data, &response_datalen);
