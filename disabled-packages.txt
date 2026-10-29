@@ -1,0 +1,34 @@
+# TCL Smart TV (C06_2K_GB) @ 192.168.18.9 — packages disabled 2026-10-24
+# Re-enable one:  adb -s 192.168.18.9:5555 shell pm enable <package>
+# Re-enable all:  grep -v '^#' disabled-packages.txt | xargs -n1 adb -s 192.168.18.9:5555 shell pm enable
+# Tier 1
+com.tcl.usercenter
+com.tcl.useragreement
+com.tcl.messagebox
+com.tcl.guard
+com.tcl.esticker
+com.tcl.waterfall.overseas
+com.google.android.tvrecommendations
+com.google.android.feedback
+com.google.android.partnersetup
+com.tcl.copydatatotv
+au.com.stan.and
+# Tier 2
+com.tcl.partnercustomizer
+com.tcl.t_solo
+com.tcl.suspension
+com.tcl.keyhelp
+com.tcl.ui_mediaCenter
+com.tcl.audioplayer
+com.tcl.imageplayer
+com.amazon.amazonvideo.livingroom
+com.google.android.youtube.tvmusic
+com.google.android.marvin.talkback
+com.google.android.backdrop
+# Removed 2026-10-24 (not covered by "re-enable all" above)
+# Uninstalled for user 0 — restore: adb -s 192.168.18.9:5555 shell cmd package install-existing com.google.android.videos
+#   com.google.android.videos
+# Fully uninstalled (reinstall from Play Store / APK): com.dailymotion.dailymotion, com.stremio.one, com.internet.tvbrowser, com.idlixku.tv
+# Replaced by the Kamar launcher (see README.md). Restore the Google home screen:
+#   adb -s 192.168.18.9:5555 shell pm enable com.google.android.tvlauncher
+#   com.google.android.tvlauncher
