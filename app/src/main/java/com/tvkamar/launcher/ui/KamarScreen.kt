@@ -115,6 +115,7 @@ private fun Launcher(
     var gridFocused by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<Pair<TvApp, Int?>?>(null) }
     var wallpaperPanel by remember { mutableStateOf(false) }
+    var airPlayPanel by remember { mutableStateOf(false) }
     val pageRequesters = remember { Page.entries.associateWith { FocusRequester() } }
     val dockRequester = remember { FocusRequester() }
     val watchRequester = remember { FocusRequester() }
@@ -250,6 +251,7 @@ private fun Launcher(
                 onSource = { actions.open(it.intent) },
                 onSettings = { actions.open(data.settingsIntent) },
                 onWallpaper = { wallpaperPanel = true },
+                onAirPlay = { airPlayPanel = true },
                 onTogglePin = { actions.setSidebarPinned(!sidebarPinned) },
                 modifier = Modifier
                     .padding(start = SIDEBAR_MARGIN, top = SIDEBAR_MARGIN, bottom = SIDEBAR_MARGIN)
@@ -282,6 +284,12 @@ private fun Launcher(
                 onNext = actions::nextWallpaper,
                 onDismiss = { wallpaperPanel = false },
             )
+        }
+    }
+
+    if (airPlayPanel) {
+        CompositionLocalProvider(LocalGlassBackdrop provides glassBackdrop) {
+            AirPlayPanel(onDismiss = { airPlayPanel = false })
         }
     }
 

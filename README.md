@@ -19,7 +19,9 @@ Home is laid out like [Arc Launcher](https://github.com/meddouribadis/arclaunche
 - **Screensaver** — after 5 min without a key press: black screen with a dim clock that moves every 30 s.
 - **Apps page** — grid of every app. Hold OK (or press Menu) on any app to move, hide or uninstall it.
 - **Remote** — Back jumps to the sidebar, Back again to the dock. Home always returns to the dock.
-- **AirPlay** — the TV shows up as **Kamar TV** under Screen Mirroring on iPhone, iPad and Mac.
+- **AirPlay** — the TV shows up under its own device name (the one Bluetooth and Chromecast use)
+  in Screen Mirroring on iPhone, iPad and Mac. Sidebar → AirPlay turns it on or off, opens the
+  TV's rename screen and shows tips when a device can't find it.
 
 ## AirPlay
 

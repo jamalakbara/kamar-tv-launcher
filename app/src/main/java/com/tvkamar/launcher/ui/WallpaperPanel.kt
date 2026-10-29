@@ -181,7 +181,7 @@ private fun intervalLabel(min: Int) = when {
 }
 
 @Composable
-private fun Section(text: String) {
+internal fun Section(text: String) {
     Text(
         text,
         Modifier.padding(start = 14.dp, top = 12.dp, bottom = 2.dp),
@@ -193,7 +193,7 @@ private fun Section(text: String) {
 
 /** Focus-highlighted row; white pill when focused, like the app menu. */
 @Composable
-private fun PanelRow(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Composable RowScope.(focused: Boolean) -> Unit) {
+internal fun PanelRow(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Composable RowScope.(focused: Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.03f else 1f, label = "panelScale")
     Row(
@@ -210,7 +210,7 @@ private fun PanelRow(modifier: Modifier = Modifier, onClick: () -> Unit, content
 
 /** A choice with a tick (or radio dot when [radio]). */
 @Composable
-private fun OptionRow(label: String, checked: Boolean, radio: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun OptionRow(label: String, checked: Boolean, radio: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     PanelRow(modifier, onClick) { focused ->
         val fg = if (focused) Color.Black else Color.White
         Box(
@@ -230,7 +230,7 @@ private fun OptionRow(label: String, checked: Boolean, radio: Boolean = false, m
 
 /** A setting whose value changes each time OK is pressed. */
 @Composable
-private fun ValueRow(label: String, value: String, onClick: () -> Unit) {
+internal fun ValueRow(label: String, value: String, onClick: () -> Unit) {
     PanelRow(onClick = onClick) { focused ->
         val fg = if (focused) Color.Black else Color.White
         Text(label, Modifier.weight(1f), color = fg, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)

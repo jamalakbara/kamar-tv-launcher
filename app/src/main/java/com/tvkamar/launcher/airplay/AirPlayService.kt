@@ -7,14 +7,29 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.database.ContentObserver
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.provider.Settings
 import android.util.Base64
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
+
+/** What the AirPlay page in the sidebar shows. */
+sealed interface AirPlayState {
+    data object Off : AirPlayState
+    data object Starting : AirPlayState
+    data class On(val name: String, val port: Int) : AirPlayState
+    data class Failed(val reason: String) : AirPlayState
+}
 
 /**
  * Makes the TV show up as an AirPlay screen on iPhones and Macs: runs the receiver, publishes it
@@ -25,11 +40,29 @@ class AirPlayService : Service(), RaopServer.Listener {
     private var audio: AudioOut? = null
     private val registrations = mutableListOf<NsdManager.RegistrationListener>()
 
+    /** Renaming the TV (Settings → Device Preferences → About → Device name) renames it for AirPlay too. */
+    private val nameObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            val current = (state as? AirPlayState.On)?.name ?: return
+            if (name(this@AirPlayService) != current) {
+                Log.i(TAG, "TV renamed, announcing AirPlay again")
+                tearDown()
+                setUp()
+            }
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         startInForeground()
+        setUp()
+        contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.DEVICE_NAME), false, nameObserver)
+    }
+
+    private fun setUp() {
+        state = AirPlayState.Starting
         val prefs = getSharedPreferences("airplay", MODE_PRIVATE)
         val seed = prefs.getString("seed", null)?.let { Base64.decode(it, Base64.NO_WRAP) }
             ?: ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -44,10 +77,11 @@ class AirPlayService : Service(), RaopServer.Listener {
             .putString("device_id", deviceId)
             .apply()
 
-        val name = prefs.getString("name", null) ?: DEFAULT_NAME
+        val name = name(this)
         val pk = server.start(seed) ?: run {
             Log.e(TAG, "AirPlay receiver failed to start")
-            return stopSelf()
+            state = AirPlayState.Failed("The receiver could not start")
+            return
         }
         val pkHex = pk.joinToString("") { "%02x".format(it) }
 
@@ -71,20 +105,36 @@ class AirPlayService : Service(), RaopServer.Listener {
         val port = server.listen()
         if (port == 0) {
             Log.e(TAG, "AirPlay receiver could not open a port")
-            return stopSelf()
+            state = AirPlayState.Failed("No network port is free")
+            return
         }
         Log.i(TAG, "AirPlay receiver '$name' ($deviceId) on port $port")
         register(name, "_airplay._tcp", port, airplay)
         register(deviceId.replace(":", "") + "@" + name, "_raop._tcp", port, raop)
+        state = AirPlayState.On(name, port)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
-
-    override fun onDestroy() {
+    private fun tearDown() {
         val nsd = getSystemService(NsdManager::class.java)
         registrations.forEach { runCatching { nsd.unregisterService(it) } }
+        registrations.clear()
+        Mirror.end()
         server.stop()
         audio?.release()
+        audio = null
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every startForegroundService() needs its own startForeground(), even while already running;
+        // otherwise Android kills the app ~10 s later. Kamar asks again each time the home screen opens.
+        startInForeground()
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        contentResolver.unregisterContentObserver(nameObserver)
+        tearDown()
+        state = AirPlayState.Off
         super.onDestroy()
     }
 
@@ -97,7 +147,10 @@ class AirPlayService : Service(), RaopServer.Listener {
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) { Log.i(TAG, "Published ${info.serviceName} $type") }
-            override fun onRegistrationFailed(info: NsdServiceInfo, error: Int) { Log.e(TAG, "Publishing $type failed: $error") }
+            override fun onRegistrationFailed(info: NsdServiceInfo, error: Int) {
+                Log.e(TAG, "Publishing $type failed: $error")
+                state = AirPlayState.Failed("Could not announce the TV on the network (error $error)")
+            }
             override fun onServiceUnregistered(info: NsdServiceInfo) = Unit
             override fun onUnregistrationFailed(info: NsdServiceInfo, error: Int) = Unit
         }
@@ -155,9 +208,40 @@ class AirPlayService : Service(), RaopServer.Listener {
         private const val MODEL = "AppleTV3,2"
         private const val SOURCE_VERSION = "220.68"
 
+        /** Live receiver state, for the AirPlay page. */
+        var state by mutableStateOf<AirPlayState>(AirPlayState.Off)
+            private set
+
+        private fun prefs(context: Context) = context.getSharedPreferences("airplay", Context.MODE_PRIVATE)
+
+        fun isEnabled(context: Context) = prefs(context).getBoolean("enabled", true)
+
+        /** The TV's own device name (also used for Bluetooth and Chromecast), as iPhones and Macs list it. */
+        fun name(context: Context): String {
+            val name = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)?.trim()
+            return if (name.isNullOrEmpty()) DEFAULT_NAME else name.fitBonjour()
+        }
+
+        /**
+         * Bonjour names are limited to 63 bytes of UTF-8, and the RAOP one adds a 13-byte
+         * "<MAC>@" prefix; cut longer names on a character boundary.
+         */
+        private fun String.fitBonjour(): String {
+            var end = length
+            while (substring(0, end).toByteArray().size > 50) end--
+            return substring(0, end).trimEnd()
+        }
+
+        /** Starts the receiver unless AirPlay was turned off. */
         fun start(context: Context) {
+            if (!isEnabled(context)) return
             runCatching { context.startForegroundService(Intent(context, AirPlayService::class.java)) }
                 .onFailure { Log.e(TAG, "Could not start AirPlay", it) }
+        }
+
+        fun setEnabled(context: Context, enabled: Boolean) {
+            prefs(context).edit().putBoolean("enabled", enabled).apply()
+            if (enabled) start(context) else context.stopService(Intent(context, AirPlayService::class.java))
         }
 
         /** DNS TXT wire format: each "key=value" prefixed by its length. */

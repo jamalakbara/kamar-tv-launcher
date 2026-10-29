@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Airplay
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Input
 import androidx.compose.material.icons.rounded.LiveTv
@@ -85,6 +86,7 @@ fun Sidebar(
     onSource: (TvSource) -> Unit,
     onSettings: () -> Unit,
     onWallpaper: () -> Unit,
+    onAirPlay: () -> Unit,
     onTogglePin: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -125,6 +127,7 @@ fun Sidebar(
                     }
                 }
             }
+            SidebarItem("AirPlay", { GlyphBadge(Icons.Rounded.Airplay, it) }, false, labels, onLongPress = onTogglePin, onClick = onAirPlay)
             SidebarItem("Wallpaper", { GlyphBadge(Icons.Rounded.Wallpaper, it) }, false, labels, onLongPress = onTogglePin, onClick = onWallpaper)
             SidebarItem("Settings", { GlyphBadge(Icons.Rounded.Settings, it) }, false, labels, onLongPress = onTogglePin, onClick = onSettings)
             Text(
